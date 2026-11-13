@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>無音タイマー</title>
+<style>
+  :root {
+    --bg: #111418;
+    --panel: #1b2027;
+    --text: #e8ecf1;
+    --sub: #8a94a3;
+    --accent: #4fd1c5;
+    --warn: #f6ad55;
+    --done: #fc8181;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 28px; padding: 20px;
+    transition: background .3s;
+  }
+  body.done { animation: flash 1s steps(1) infinite; }
+  @keyframes flash { 0% { background: #5a1e1e; } 50% { background: var(--bg); } }
+
+  #display {
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(56px, 18vw, 200px);
+    font-weight: 700; letter-spacing: .02em; line-height: 1;
+  }
+  body.running #display { color: var(--accent); }
+  body.paused #display { color: var(--warn); }
+  body.done #display { color: var(--done); }
+
+  .bar { width: min(90vw, 700px); height: 8px; background: var(--panel); border-radius: 4px; overflow: hidden; }
+  #progress { height: 100%; width: 0%; background: var(--accent); transition: width .2s linear; }
+
+  .setters { display: flex; gap: 14px; }
+  .unit { background: var(--panel); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 92px; }
+  .unit label { font-size: 13px; color: var(--sub); }
+  .unit input {
+    width: 100%; text-align: center; font-size: 30px; font-weight: 600;
+    background: transparent; color: var(--text); border: none; outline: none;
+    font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+  }
+  .unit input::-webkit-inner-spin-button, .unit input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .unit button { width: 100%; padding: 6px 0; font-size: 20px; }
+
+  button {
+    background: #2a313b; color: var(--text); border: none; border-radius: 10px;
+    cursor: pointer; font-family: inherit;
+  }
+  button:active { transform: scale(.96); }
+  button:disabled { opacity: .35; cursor: default; }
+
+  .controls { display: flex; gap: 12px; }
+  .controls button { font-size: 20px; padding: 14px 26px; min-width: 110px; }
+  #startBtn { background: var(--accent); color: #0b1a19; font-weight: 700; }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .presets button { padding: 8px 14px; font-size: 15px; color: var(--sub); }
+
+  body.active .setters, body.active .presets { opacity: .3; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div id="display">00:00:00</div>
+  <div class="bar"><div id="progress"></div></div>
+
+  <div class="setters">
+    <div class="unit">
+      <label>時</label>
+      <button data-u="h" data-d="1">＋</button>
+      <input id="h" type="number" min="0" max="99" value="0" inputmode="numeric">
+      <button data-u="h" data-d="-1">－</button>
+    </div>
+    <div class="unit">
+      <label>分</label>
+      <button data-u="m" data-d="1">＋</button>
+      <input id="m" type="number" min="0" max="59" value="5" inputmode="numeric">
+      <button data-u="m" data-d="-1">－</button>
+    </div>
+    <div class="unit">
+      <label>秒</label>
+      <button data-u="s" data-d="1">＋</button>
+      <input id="s" type="number" min="0" max="59" value="0" inputmode="numeric">
+      <button data-u="s" data-d="-1">－</button>
+    </div>
+  </div>
+
+  <div class="presets">
+    <button data-p="60">1分</button>
+    <button data-p="180">3分</button>
+    <button data-p="300">5分</button>
+    <button data-p="600">10分</button>
+    <button data-p="1800">30分</button>
+    <button data-p="3600">1時間</button>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn">スタート</button>
+    <button id="resetBtn">リセット</button>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const inputs = { h: $('h'), m: $('m'), s: $('s') };
+  const max = { h: 99, m: 59, s: 59 };
+  const display = $('display'), progress = $('progress');
+  const startBtn = $('startBtn'), resetBtn = $('resetBtn');
+
+  let state = 'idle';      // idle | running | paused | done
+  let total = 0;           // 設定秒数(ms)
+  let remaining = 0;       // 残り(ms)
+  let endAt = 0;
+  let timerId = null;
+  let wakeLock = null;
+
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = ms => {
+    const t = Math.ceil(ms / 1000);
+    return `${pad(Math.floor(t / 3600))}:${pad(Math.floor(t % 3600 / 60))}:${pad(t % 60)}`;
+  };
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  function readInputs() {
+    for (const k in inputs) inputs[k].value = clamp(parseInt(inputs[k].value) || 0, 0, max[k]);
+    return (+inputs.h.value * 3600 + +inputs.m.value * 60 + +inputs.s.value) * 1000;
+  }
+  function setInputs(sec) {
+    inputs.h.value = Math.min(99, Math.floor(sec / 3600));
+    inputs.m.value = Math.floor(sec % 3600 / 60);
+    inputs.s.value = sec % 60;
+    render(readInputs(), 0);
+  }
+  function render(ms, ratio) {
+    display.textContent = fmt(ms);
+    progress.style.width = (ratio * 100) + '%';
+    document.title = state === 'idle' ? '無音タイマー' : fmt(ms);
+  }
+  function setState(s) {
+    state = s;
+    document.body.className = s === 'idle' ? '' : s + (s !== 'done' ? ' active' : '');
+    startBtn.textContent = s === 'running' ? '一時停止' : s === 'paused' ? '再開' : 'スタート';
+    startBtn.disabled = s === 'done';
+  }
+
+  async function keepAwake(on) {
+    try {
+      if (on && 'wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+      else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+    } catch (e) {}
+  }
+
+  function tick() {
+    remaining = Math.max(0, endAt - Date.now());
+    render(remaining, 1 - remaining / total);
+    if (remaining <= 0) {
+      clearInterval(timerId);
+      setState('done');
+      render(0, 1);
+      document.title = '⏰ 時間です';
+      keepAwake(false);
+    }
+  }
+
+  function start() {
+    if (state === 'idle') {
+      total = remaining = readInputs();
+      if (total <= 0) return;
+    }
+    endAt = Date.now() + remaining;
+    setState('running');
+    keepAwake(true);
+    tick();
+    timerId = setInterval(tick, 100);
+  }
+  function pause() {
+    clearInterval(timerId);
+    remaining = Math.max(0, endAt - Date.now());
+    setState('paused');
+    keepAwake(false);
+  }
+  function reset() {
+    clearInterval(timerId);
+    setState('idle');
+    keepAwake(false);
+    render(readInputs(), 0);
+  }
+
+  startBtn.onclick = () => state === 'running' ? pause() : start();
+  resetBtn.onclick = reset;
+  document.body.addEventListener('click', e => { if (state === 'done' && e.target !== resetBtn) reset(); });
+
+  document.querySelectorAll('.unit button').forEach(b => {
+    b.onclick = () => {
+      const k = b.dataset.u, inp = inputs[k];
+      let v = (parseInt(inp.value) || 0) + +b.dataset.d;
+      if (v > max[k]) v = 0; if (v < 0) v = max[k];
+      inp.value = v;
+      render(readInputs(), 0);
+    };
+  });
+  Object.values(inputs).forEach(inp => inp.addEventListener('input', () => { if (state === 'idle') render(readInputs(), 0); }));
+  document.querySelectorAll('.presets button').forEach(b => b.onclick = () => setInputs(+b.dataset.p));
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') { e.preventDefault(); state === 'done' ? reset() : startBtn.click(); }
+    if (e.key === 'r' || e.key === 'R') reset();
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state === 'running') keepAwake(true); });
+
+  render(readInputs(), 0);
+</script>
+</body>
+</html>
