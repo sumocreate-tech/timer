@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-title" content="無音タイマー">
 <meta name="theme-color" content="#f4f1ea">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>無音タイマー</title>
 <style>
   :root {
@@ -25,6 +25,7 @@
     font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    touch-action: manipulation;
   }
   body {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -60,6 +61,7 @@
   button {
     background: #2a313b; color: var(--text); border: none; border-radius: 10px;
     cursor: pointer; font-family: inherit;
+    touch-action: manipulation;
   }
   button:active { transform: scale(.96); }
   button:disabled { opacity: .35; cursor: default; }
@@ -114,6 +116,15 @@
   </div>
 
 <script>
+  // ダブルタップ/ピンチによる拡大を無効化(iOS Safari対策)
+  ['gesturestart','gesturechange','gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', e => {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 350) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive: false });
+
   const $ = id => document.getElementById(id);
   const inputs = { h: $('h'), m: $('m'), s: $('s') };
   const max = { h: 99, m: 59, s: 59 };
