@@ -90,7 +90,7 @@
     <div class="unit">
       <label>分</label>
       <button data-u="m" data-d="1">＋</button>
-      <input id="m" type="number" min="0" max="59" value="5" inputmode="numeric">
+      <input id="m" type="number" min="0" max="59" value="0" inputmode="numeric">
       <button data-u="m" data-d="-1">－</button>
     </div>
     <div class="unit">
@@ -146,6 +146,7 @@
     inputs.m.value = Math.floor(sec % 3600 / 60);
     inputs.s.value = sec % 60;
     render(readInputs(), 0);
+    save();
   }
   function render(ms, ratio) {
     display.textContent = fmt(ms);
@@ -157,6 +158,47 @@
     document.body.className = s === 'idle' ? '' : s + (s !== 'done' ? ' active' : '');
     startBtn.textContent = s === 'running' ? '一時停止' : s === 'paused' ? '再開' : 'スタート';
     startBtn.disabled = s === 'done';
+    save();
+  }
+
+  // ---- 状態の保存・復元(ページが勝手にリロードされても続きから再開) ----
+  const KEY = 'silentTimerState';
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        state, total, remaining, endAt,
+        h: inputs.h.value, m: inputs.m.value, s: inputs.s.value
+      }));
+    } catch (e) {}
+  }
+  function restore() {
+    let d = null;
+    try { d = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+    if (!d) return false;
+    inputs.h.value = d.h; inputs.m.value = d.m; inputs.s.value = d.s;
+    total = d.total || 0;
+    if (d.state === 'running') {
+      endAt = d.endAt;
+      remaining = Math.max(0, endAt - Date.now());
+      setState('running');
+      keepAwake(true);
+      tick();
+      if (state === 'running') timerId = setInterval(tick, 100);
+      return true;
+    }
+    if (d.state === 'paused') {
+      remaining = d.remaining;
+      setState('paused');
+      render(remaining, total ? 1 - remaining / total : 0);
+      return true;
+    }
+    if (d.state === 'done') {
+      setState('done');
+      render(0, 1);
+      document.title = '⏰ 時間です';
+      return true;
+    }
+    return false;
   }
 
   async function keepAwake(on) {
@@ -197,9 +239,11 @@
   }
   function reset() {
     clearInterval(timerId);
+    total = remaining = 0;
+    for (const k in inputs) inputs[k].value = 0;   // 設定時間も 0 に戻す
     setState('idle');
     keepAwake(false);
-    render(readInputs(), 0);
+    render(0, 0);
   }
 
   startBtn.onclick = () => state === 'running' ? pause() : start();
@@ -213,9 +257,10 @@
       if (v > max[k]) v = 0; if (v < 0) v = max[k];
       inp.value = v;
       render(readInputs(), 0);
+      save();
     };
   });
-  Object.values(inputs).forEach(inp => inp.addEventListener('input', () => { if (state === 'idle') render(readInputs(), 0); }));
+  Object.values(inputs).forEach(inp => inp.addEventListener('input', () => { if (state === 'idle') { render(readInputs(), 0); save(); } }));
   // 現在の設定時間に加算(最大 99:59:59)
   const MAX_SEC = 99 * 3600 + 59 * 60 + 59;
   document.querySelectorAll('.presets button').forEach(b => b.onclick = () => {
@@ -230,7 +275,10 @@
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state === 'running') keepAwake(true); });
 
-  render(readInputs(), 0);
+  if (!restore()) render(readInputs(), 0);
+
+  // オフラインでも開けるようにキャッシュ
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
 </html>
