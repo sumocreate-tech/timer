@@ -158,6 +158,7 @@
     document.body.className = s === 'idle' ? '' : s + (s !== 'done' ? ' active' : '');
     startBtn.textContent = s === 'running' ? '一時停止' : s === 'paused' ? '再開' : 'スタート';
     startBtn.disabled = s === 'done';
+    resetBtn.disabled = s === 'running';   // 動作中はリセット不可
     save();
   }
 
@@ -247,7 +248,7 @@
   }
 
   startBtn.onclick = () => state === 'running' ? pause() : start();
-  resetBtn.onclick = reset;
+  resetBtn.onclick = () => { if (state !== 'running') reset(); };
   document.body.addEventListener('click', e => { if (state === 'done' && e.target !== resetBtn) reset(); });
 
   document.querySelectorAll('.unit button').forEach(b => {
@@ -271,7 +272,7 @@
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT') return;
     if (e.code === 'Space') { e.preventDefault(); state === 'done' ? reset() : startBtn.click(); }
-    if (e.key === 'r' || e.key === 'R') reset();
+    if ((e.key === 'r' || e.key === 'R') && state !== 'running') reset();
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state === 'running') keepAwake(true); });
 
