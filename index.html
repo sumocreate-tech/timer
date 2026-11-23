@@ -102,12 +102,9 @@
   </div>
 
   <div class="presets">
-    <button data-p="60">1分</button>
-    <button data-p="180">3分</button>
-    <button data-p="300">5分</button>
-    <button data-p="600">10分</button>
-    <button data-p="1800">30分</button>
-    <button data-p="3600">1時間</button>
+    <button data-add="600">＋10分</button>
+    <button data-add="1800">＋30分</button>
+    <button data-add="3600">＋1時間</button>
   </div>
 
   <div class="controls">
@@ -219,7 +216,12 @@
     };
   });
   Object.values(inputs).forEach(inp => inp.addEventListener('input', () => { if (state === 'idle') render(readInputs(), 0); }));
-  document.querySelectorAll('.presets button').forEach(b => b.onclick = () => setInputs(+b.dataset.p));
+  // 現在の設定時間に加算(最大 99:59:59)
+  const MAX_SEC = 99 * 3600 + 59 * 60 + 59;
+  document.querySelectorAll('.presets button').forEach(b => b.onclick = () => {
+    const cur = readInputs() / 1000;
+    setInputs(Math.min(MAX_SEC, cur + +b.dataset.add));
+  });
 
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT') return;
